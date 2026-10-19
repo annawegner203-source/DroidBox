@@ -1,0 +1,89 @@
+name: Build DroidBox IPA
+on:
+  push:
+    branches:
+      - 'main'
+    paths-ignore:
+      - '**.md'
+  workflow_dispatch:
+    inputs:
+      rebuild_sysroot:
+        description: 'Force rebuild sysroot?'
+        required: true
+        default: 'false'
+
+env:
+  PLATFORM: ios-tci
+  ARCH: arm64
+
+jobs:
+  build-sysroot:
+    name: Build Sysroot (QEMU, ios-tci)
+    runs-on: macos-26
+    timeout-minutes: 360
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - name: Check Cache
+        id: cache-sysroot
+        uses: actions/cache/restore@v4
+        with:
+          path: ./sysroot-${{ env.PLATFORM }}-${{ env.ARCH }}
+          key: ${{ env.PLATFORM }}-${{ env.ARCH }}-${{ hashFiles('scripts/build_dependencies.sh', 'scripts/fixup.sh') }}-${{ hashFiles('patches/**') }}
+          lookup-only: true
+      - name: Setup Path
+        run: echo "/usr/local/opt/bison/bin:/opt/homebrew/opt/bison/bin" >> $GITHUB_PATH
+      - name: Install Requirements
+        if: steps.cache-sysroot.outputs.cache-hit != 'true' || github.event.inputs.rebuild_sysroot == 'true'
+        run: |
+          brew uninstall cmake || true
+          brew install bison pkg-config gettext glib-utils libgpg-error nasm make meson cmake
+          brew install llvm spirv-llvm-translator libxcb libxrandr
+          pip3 install --break-system-packages --user six pyparsing pyyaml setuptools distlib mako
+          rm -f /usr/local/lib/pkgconfig/*.pc
+      - name: Build Sysroot
+        if: steps.cache-sysroot.outputs.cache-hit != 'true' || github.event.inputs.rebuild_sysroot == 'true'
+        run: ./scripts/build_dependencies.sh -p ${{ env.PLATFORM }} -a ${{ env.ARCH }}
+        env:
+          NCPU: 1 # TCI build runs out of memory with more jobs
+      - name: Save Cache
+        if: steps.cache-sysroot.outputs.cache-hit != 'true' || github.event.inputs.rebuild_sysroot == 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: ./sysroot-${{ env.PLATFORM }}-${{ env.ARCH }}
+          key: ${{ steps.cache-sysroot.outputs.cache-primary-key }}
+          upload-chunk-size: 1048576
+
+  build-ipa:
+    name: Build and package IPA
+    runs-on: macos-26
+    needs: build-sysroot
+    timeout-minutes: 120
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - name: Restore Sysroot
+        uses: actions/cache/restore@v4
+        with:
+          path: ./sysroot-${{ env.PLATFORM }}-${{ env.ARCH }}
+          key: ${{ env.PLATFORM }}-${{ env.ARCH }}-${{ hashFiles('scripts/build_dependencies.sh', 'scripts/fixup.sh') }}-${{ hashFiles('patches/**') }}
+          restore-keys: ${{ env.PLATFORM }}-${{ env.ARCH }}-${{ hashFiles('scripts/build_dependencies.sh', 'scripts/fixup.sh') }}-${{ hashFiles('patches/**') }}
+          fail-on-cache-miss: true
+      - name: Build app
+        run: ./scripts/build_utm.sh -k iphoneos -s iOS-SE -a ${{ env.ARCH }} -o UTM
+      - name: Install ldid
+        run: brew install ldid
+      - name: Fakesign IPA
+        run: |
+          mkdir out
+          ./scripts/package.sh ipa-se UTM.xcarchive out
+          mv "out/UTM SE.ipa" DroidBox.ipa
+      - name: Upload IPA
+        uses: actions/upload-artifact@v4
+        with:
+          name: DroidBox-ipa
+          path: DroidBox.ipa
