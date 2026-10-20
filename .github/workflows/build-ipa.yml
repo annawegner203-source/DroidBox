@@ -73,6 +73,8 @@ jobs:
           key: ${{ env.PLATFORM }}-${{ env.ARCH }}-${{ hashFiles('scripts/build_dependencies.sh', 'scripts/fixup.sh') }}-${{ hashFiles('patches/**') }}
           restore-keys: ${{ env.PLATFORM }}-${{ env.ARCH }}-${{ hashFiles('scripts/build_dependencies.sh', 'scripts/fixup.sh') }}-${{ hashFiles('patches/**') }}
           fail-on-cache-miss: true
+      - name: Install Metal Toolchain
+        run: xcodebuild -downloadComponent MetalToolchain
       - name: Build app
         run: |
           xcodebuild -version
