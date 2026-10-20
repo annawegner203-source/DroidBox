@@ -58,7 +58,7 @@ jobs:
 
   build-ipa:
     name: Build and package IPA
-    runs-on: macos-26
+    runs-on: xcode-27 # UTM main uses iOS 27 SDK APIs (sceneAccessory, visibilityPriority)
     needs: build-sysroot
     timeout-minutes: 120
     steps:
@@ -74,7 +74,9 @@ jobs:
           restore-keys: ${{ env.PLATFORM }}-${{ env.ARCH }}-${{ hashFiles('scripts/build_dependencies.sh', 'scripts/fixup.sh') }}-${{ hashFiles('patches/**') }}
           fail-on-cache-miss: true
       - name: Build app
-        run: ./scripts/build_utm.sh -k iphoneos -s iOS-SE -a ${{ env.ARCH }} -o UTM
+        run: |
+          xcodebuild -version
+          ./scripts/build_utm.sh -k iphoneos -s iOS-SE -a ${{ env.ARCH }} -o UTM
       - name: Install ldid
         run: brew install ldid
       - name: Fakesign IPA
